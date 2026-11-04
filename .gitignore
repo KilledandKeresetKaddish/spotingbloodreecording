@@ -1,0 +1,22 @@
+# Personal data and secrets live only on the server — never commit them.
+.env
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+exports/
+health-*.json
+health-*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
