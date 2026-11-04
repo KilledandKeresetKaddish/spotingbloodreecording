@@ -1,0 +1,13 @@
+services:
+  health:
+    build: .
+    image: health-log:latest
+    container_name: health-log
+    restart: unless-stopped
+    environment:
+      HEALTH_DB: /data/health.db
+    volumes:
+      - ./data:/data            # the SQLite file stays on the server, never in git
+    ports:
+      # only this machine (Caddy) can reach the app; there is no login inside the app
+      - "127.0.0.1:${HEALTH_PORT:-8000}:8000"
