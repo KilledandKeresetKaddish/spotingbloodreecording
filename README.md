@@ -46,7 +46,19 @@ health.example.com {
 }
 ```
 
-如果 Caddy 也跑在 Docker 里：把两个容器放进同一个 Docker 网络，改成 `reverse_proxy health-log:8000`，并删掉 `docker-compose.yml` 里的 `ports:`。
+如果 Caddy 也跑在 Docker 里：先看它在哪个网络（`docker inspect <caddy 容器> --format '{{json .NetworkSettings.Networks}}'`），再在服务器上建一个 `docker-compose.override.yml`（已经在 `.gitignore` 里）让这个 app 也加入那个网络：
+
+```yaml
+services:
+  health:
+    networks: [default, caddy]
+networks:
+  caddy:
+    external: true
+    name: caddy_default   # 换成 Caddy 所在的网络名
+```
+
+Caddyfile 里就写 `reverse_proxy health-log:8000`。`127.0.0.1` 上的端口可以留着，方便在服务器上用 curl 测。
 
 更新：
 
