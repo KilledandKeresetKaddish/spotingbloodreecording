@@ -370,6 +370,7 @@ function stripCard(strip, sel, t) {
   const labels = new Map();
   const todayCol = todayDay ? todayDay.cycle_day : null;
   for (let n = 1; n <= days.length; n += n === 1 ? 9 : 10) labels.set(n, String(n));
+  for (const k of [...labels.keys()]) if (days.length - k < 3) labels.delete(k);
   labels.set(days.length, String(days.length));
   if (todayCol) {
     for (const k of [...labels.keys()]) if (Math.abs(k - todayCol) < 3) labels.delete(k);
@@ -1141,12 +1142,15 @@ function onboardSheet() {
 // ---------------------------------------------------------------- router
 
 let renderSeq = 0;
+let lastPage = null;
 async function render() {
   const seq = ++renderSeq;
   for (const flush of flushers) flush();
   await pending;
   flushers.clear();
   const [, name = '', arg] = location.hash.replace(/^#/, '').split('/');
+  const page = name === 'day' ? `day|${isDate(arg) ? arg : today()}`
+    : ['cycles', 'settings'].includes(name) ? name : `calendar|${state.selected || today()}`;
   let node;
   try {
     if (!state.config) state.config = await api('api/config');
@@ -1158,7 +1162,14 @@ async function render() {
     node = h('p', { class: 'empty center', style: 'padding:24px 16px' }, `出错了：${e.message}`);
   }
   if (seq !== renderSeq) return;
+  const keep = page === lastPage ? { y: window.scrollY, side: $view.querySelector('.side')?.scrollTop || 0 } : null;
   $view.replaceChildren(node);
+  if (keep) {
+    const side = $view.querySelector('.side');
+    if (side) side.scrollTop = keep.side;
+    window.scrollTo(0, keep.y);
+  }
+  lastPage = page;
   const tab = name || 'calendar';
   document.querySelectorAll('.tabs a').forEach((a) => {
     if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page');
