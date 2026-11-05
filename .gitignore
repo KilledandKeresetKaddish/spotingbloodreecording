@@ -1,6 +1,7 @@
 # Personal data and secrets live only on the server — never commit them.
 .env
-docker-compose.override.yml   # per-server tweaks, e.g. joining Caddy's network
+# per-server tweaks, e.g. joining the network of a Caddy container
+docker-compose.override.yml
 data/
 *.db
 *.db-*
