@@ -55,7 +55,8 @@
 
 - 导出 JSON（完整，可以再导入）和 CSV（给表格软件看，UTF-8 带 BOM）。
 - 导入是合并：已有的分类、项目保留，一模一样的记录跳过。
-- 用自己的格式（`format = health-log`，`version = 1`）。Ovumcy 的数据以后写脚本转成这个格式再导入。
+- 用自己的格式（`format = health-log`，`version = 1`）。
+- Ovumcy：`tools/ovumcy_to_healthlog.py` 转成这个格式再导入。月经、经量（spotting 0.5 / light 1 / medium 2 / heavy 3）、症状、周期因素对到内置项目；笔记里的「Spotting:N」变成那天的经量 N；只勾了 spotting 没记量的，放进一个隐藏的「spotting（没记量）」项目，日历上照样显示成 spotting；笔记里出现「外出 / 出门」「冰淇淋 / 冷饮」「运动」会顺便勾上对应的生活项目；其余（心情评分、没有对应项目的症状、不认识的值）都原样留在那天的笔记里。
 
 ## 写代码时做的小决定（不对就改）
 
