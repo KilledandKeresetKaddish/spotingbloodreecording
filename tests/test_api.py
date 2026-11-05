@@ -213,3 +213,43 @@ def test_export_then_import_into_a_new_database(client, tmp_path):
         assert sum(x["period"] for x in days.values()) == 5
 
     assert client.post("/api/import", json={"format": "other"}).status_code == 422
+
+
+def test_result_items_need_options(client):
+    no_options = {"category_id": "tests", "name": "试纸X", "kind": "result"}
+    assert client.post("/api/items", json=no_options).status_code == 422
+    assert client.post("/api/items", json={**no_options, "options": [" ", ""]}).status_code == 422
+    item = client.post("/api/items", json={**no_options, "options": ["阴性", "阳性"]}).json()
+    entry = client.post("/api/entries", json={"date": iso(START), "item_id": item["id"], "choice": "阳性"})
+    assert entry.status_code == 200 and entry.json()["choice"] == "阳性"
+    assert client.patch(f"/api/items/{item['id']}", json={"options": None}).status_code == 422
+
+
+def test_import_keeps_markers_and_restore_brings_back_layout(client, tmp_path):
+    med = client.post("/api/items", json={"category_id": "meds", "name": "药物A", "kind": "medication"}).json()
+    client.patch(f"/api/items/{med['id']}", json={"on_strip": True})
+    client.patch("/api/items/life_01", json={"on_strip": True})
+    client.patch("/api/categories/bleeding", json={"name": "出血"})
+    client.patch("/api/items/mood_02", json={"hidden": True})
+    client.put("/api/settings", json={"cup_ml": 330})
+    dump = client.get("/api/export.json").json()
+
+    def config(c):
+        cfg = c.get("/api/config").json()
+        items = {i["id"]: i for cat in cfg["categories"] for i in cat["items"]}
+        return cfg, items
+
+    with TestClient(create_app(str(tmp_path / "merge.db"))) as other:
+        other.post("/api/import", json=dump)
+        cfg, items = config(other)
+        assert items[med["id"]]["on_strip"] and items["life_01"]["on_strip"]
+        assert cfg["categories"][0]["name"] == "血量"  # a plain merge leaves existing names alone
+        assert cfg["settings"]["cup_ml"] == 500
+
+    with TestClient(create_app(str(tmp_path / "restore.db"))) as other:
+        other.post("/api/import", json=dump, params={"restore": "true"})
+        cfg, items = config(other)
+        assert cfg["categories"][0]["name"] == "出血"
+        assert items["mood_02"]["hidden"] is True
+        assert items[med["id"]]["on_strip"] and items["life_01"]["on_strip"]
+        assert cfg["settings"]["cup_ml"] == 330

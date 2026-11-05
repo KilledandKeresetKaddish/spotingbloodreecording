@@ -534,6 +534,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             bad("类型只能是：" + ", ".join(CUSTOM_KINDS), 422)
         if body.default_value is not None and (not math.isfinite(body.default_value) or body.default_value <= 0):
             bad("默认量要大于 0", 422)
+        if body.kind == "result" and not body.options:
+            bad("结果类项目至少要一个选项，比如：阴性, 阳性", 422)
         options = clean_options(body.kind, body.options)
         sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 FROM items WHERE category_id = ?",
                             (body.category_id,)).fetchone()[0]
@@ -571,6 +573,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if "options" in fields:
             if item["role"]:
                 bad("内置项目的选项不能改")
+            if item["kind"] == "result" and not body.options:
+                bad("结果类项目至少要一个选项", 422)
             updates["options"] = clean_options(item["kind"], body.options)
         if body.hidden is not None:
             if body.hidden and item["role"] in UNHIDEABLE_ROLES:
@@ -763,33 +767,69 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         headers={"Content-Disposition": f'attachment; filename="health-{stamp}.csv"'})
 
     @app.post("/api/import")
-    def import_json(body: dict[str, Any], replace_settings: bool = False, conn: sqlite3.Connection = Conn):
-        """Merge an export file. Existing categories/items are kept; identical entries are skipped."""
+    def import_json(body: dict[str, Any], restore: bool = False, conn: sqlite3.Connection = Conn):
+        """Merge an export file: new categories and items are added, identical entries skipped,
+        strip markers kept while there is room. restore=true (bringing a backup back) also
+        applies the file's settings, names, order and hidden flags to what already exists."""
         if body.get("format") != EXPORT_FORMAT or body.get("version") != EXPORT_VERSION:
             bad(f"需要 {EXPORT_FORMAT} v{EXPORT_VERSION} 格式的文件", 422)
         added = {"categories": 0, "items": 0, "entries": 0, "skipped": 0}
-        settings = load_settings(conn)
+        pins: list[str] = []  # items marked on the strip in the file, in file order
         try:
             for c in body.get("categories", []):
-                cur = conn.execute(
-                    "INSERT OR IGNORE INTO categories (id, name, sort, builtin, hidden) VALUES (?, ?, ?, 0, ?)",
-                    (str(c["id"]), str(c["name"])[:40], int(c.get("sort", 0)), int(bool(c.get("hidden")))))
-                added["categories"] += cur.rowcount
+                cat_id, name = str(c["id"]), clean_name(str(c["name"]))[:40]
+                sort, hidden = int(c.get("sort", 0)), bool(c.get("hidden"))
+                row = conn.execute("SELECT builtin FROM categories WHERE id = ?", (cat_id,)).fetchone()
+                if row is None:
+                    conn.execute("INSERT INTO categories (id, name, sort, builtin, hidden) VALUES (?, ?, ?, 0, ?)",
+                                 (cat_id, name, sort, int(hidden)))
+                    added["categories"] += 1
+                elif restore:
+                    conn.execute("UPDATE categories SET name = ?, sort = ?, hidden = ? WHERE id = ?",
+                                 (name, sort, int(hidden and not row["builtin"]), cat_id))
             for i in body.get("items", []):
-                if conn.execute("SELECT 1 FROM items WHERE id = ?", (str(i["id"]),)).fetchone():
-                    continue
-                kind = i.get("kind")
-                if kind not in CUSTOM_KINDS:
-                    bad(f"项目 {i['id']} 的类型不对", 422)
-                if conn.execute("SELECT 1 FROM categories WHERE id = ?", (str(i["category_id"]),)).fetchone() is None:
-                    bad(f"项目 {i['id']} 的分类不存在", 422)
-                conn.execute(
-                    "INSERT INTO items (id, category_id, name, kind, unit, default_value, options, sort, hidden)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (str(i["id"]), str(i["category_id"]), str(i["name"])[:40], kind, i.get("unit"),
-                     i.get("default_value"), clean_options(kind, i.get("options")), int(i.get("sort", 0)),
-                     int(bool(i.get("hidden")))))
-                added["items"] += 1
+                item_id, name = str(i["id"]), clean_name(str(i["name"]))[:40]
+                kind, cat_id = i.get("kind"), str(i["category_id"])
+                if i.get("on_strip"):
+                    pins.append(item_id)
+                cat_exists = conn.execute("SELECT 1 FROM categories WHERE id = ?", (cat_id,)).fetchone()
+                row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+                if row is None:
+                    if kind not in CUSTOM_KINDS:
+                        bad(f"项目 {item_id} 的类型不对", 422)
+                    if cat_exists is None:
+                        bad(f"项目 {item_id} 的分类不存在", 422)
+                    conn.execute(
+                        "INSERT INTO items (id, category_id, name, kind, unit, default_value, options, sort, hidden)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (item_id, cat_id, name, kind, i.get("unit"), i.get("default_value"),
+                         clean_options(kind, i.get("options")), int(i.get("sort", 0)), int(bool(i.get("hidden")))))
+                    added["items"] += 1
+                elif restore:
+                    hidden = bool(i.get("hidden")) and row["role"] not in UNHIDEABLE_ROLES
+                    conn.execute("UPDATE items SET name = ?, sort = ?, hidden = ?, unit = ?, default_value = ?"
+                                 " WHERE id = ?", (name, int(i.get("sort", 0)), int(hidden), i.get("unit"),
+                                                   i.get("default_value"), item_id))
+                    if not row["role"] and kind == row["kind"]:
+                        if cat_exists:
+                            conn.execute("UPDATE items SET category_id = ? WHERE id = ?", (cat_id, item_id))
+                        if i.get("options"):
+                            conn.execute("UPDATE items SET options = ? WHERE id = ?",
+                                         (clean_options(kind, i["options"]), item_id))
+            if restore:
+                conn.execute("UPDATE items SET on_strip = 0")
+            pinned = conn.execute("SELECT COUNT(*) FROM items WHERE on_strip = 1").fetchone()[0]
+            for item_id in pins:
+                if pinned >= MAX_STRIP_ITEMS:
+                    break
+                cur = conn.execute("UPDATE items SET on_strip = 1 WHERE id = ? AND hidden = 0 AND on_strip = 0",
+                                   (item_id,))
+                pinned += cur.rowcount
+            settings = load_settings(conn)
+            if restore and isinstance(body.get("settings"), dict):
+                save_settings(conn, clean_settings(
+                    {k: v for k, v in body["settings"].items() if k in SETTING_RULES}))
+                settings = load_settings(conn)
             for e in body.get("entries", []):
                 d = parse_date(e.get("date"), "entries.date").isoformat()
                 item = get_item(conn, str(e.get("item_id")))
@@ -812,9 +852,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 conn.execute("INSERT INTO entries (date, item_id, value, choice, text, time, source)"
                              " VALUES (?, ?, ?, ?, ?, ?, ?)", (d, item["id"], value, choice, text, time, source))
                 added["entries"] += 1
-            if replace_settings and isinstance(body.get("settings"), dict):
-                save_settings(conn, clean_settings(
-                    {k: v for k, v in body["settings"].items() if k in SETTING_RULES}))
         except (KeyError, TypeError, ValueError) as exc:
             conn.rollback()
             bad(f"文件内容不完整：{exc}", 422)

@@ -637,7 +637,9 @@ function resultBlock(item, date, entries) {
       },
       long: () => resultSheet(item, date, null, list, opt),
     });
-  }));
+  }), options.length ? null : h('button', {
+    type: 'button', class: 'chip dashed', onclick: () => resultSheet(item, date, null, list),
+  }, '＋ 记一条'));
   const lines = list.map((e) => h('button', { type: 'button', class: 'entry-line', onclick: () => resultSheet(item, date, e, list) },
     h('span', {}, resultLine(item, e)), e.text ? h('span', { class: 'meta' }, e.text) : null));
   return h('div', { class: 'block' },
@@ -647,8 +649,8 @@ function resultBlock(item, date, entries) {
 }
 
 function resultSheet(item, date, entry, list, preset) {
-  const numeric = item.role === 'lh' || !!item.unit;
   const options = item.options || [];
+  const numeric = item.role === 'lh' || !!item.unit || !options.length;
   const threshold = settings().lh_positive_threshold;
   openSheet(item.name, entry ? `${md(date)} · 改这一条` : `${md(date)} · 新的一条`, ({ body, err, save }) => {
     let mode = numeric && (entry ? entry.value != null : true) ? 'value' : 'choice';
@@ -693,7 +695,7 @@ function resultSheet(item, date, entry, list, preset) {
     });
     const others = (list || []).filter((e) => !entry || e.id !== entry.id);
     body.append(
-      numeric ? seg : null, valuePane, choicePane,
+      numeric && options.length ? seg : null, valuePane, choicePane,
       group('测试时间', time, 'sheet-time', entry ? null : '默认是现在'),
       group('备注', note, 'sheet-note'),
       others.length ? group('这天的其他记录', entryList(others.map((e) => h('button', {
@@ -1064,7 +1066,7 @@ function itemSheet(cat, item) {
     const options = h('input', { id: 'sheet-options', class: 'field wide', placeholder: '用逗号隔开，比如：少,中,多', value: (item?.options || []).join(',') });
     const unitGroup = group('单位', unit, 'sheet-unit');
     const amountGroup = group('默认量', amount, 'sheet-default', '点一下时记的量；不填就是 1');
-    const optionsGroup = group('选项', options, 'sheet-options');
+    const optionsGroup = group('选项', options, 'sheet-options', '结果类至少要一个，比如：阴性,阳性');
     const paint = () => {
       const k = kind.value;
       unitGroup.hidden = !['count', 'number', 'medication', 'result'].includes(k);
@@ -1094,12 +1096,13 @@ function itemSheet(cat, item) {
 
 function importControl() {
   const input = h('input', { id: 'import-file', type: 'file', accept: 'application/json,.json', class: 'field wide', style: 'padding-top:10px' });
+  const restore = h('input', { id: 'import-restore', type: 'checkbox', style: 'width:20px;height:20px;accent-color:var(--rose)' });
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      const r = await api('api/import', { method: 'POST', body: data });
+      const r = await api('api/import', { method: 'POST', body: data, query: { restore: restore.checked ? 'true' : null } });
       toast(`导入了 ${r.entries} 条记录（重复跳过 ${r.skipped} 条）`);
       state.config = null;
       await render();
@@ -1108,7 +1111,10 @@ function importControl() {
     }
     input.value = '';
   });
-  return group('导入（合并进来，重复的跳过）', input, 'import-file');
+  return h('div', { class: 'block' },
+    group('导入（合并进来，重复的跳过）', input, 'import-file'),
+    h('label', { for: 'import-restore', class: 'hint', style: 'display:flex;align-items:center;gap:8px;min-height:44px' },
+      restore, '从备份还原：连设置、改名、排序、隐藏和记号一起恢复'));
 }
 
 // ---------------------------------------------------------------- first run

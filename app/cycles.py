@@ -95,7 +95,7 @@ def compute_stats(groups: list[list[date]], today: date, rules: Rules) -> Stats:
 
     avg_cycle = round(sum(recent) / len(recent), 1) if recent else None
     avg_period = round(sum(recent_spans) / len(recent_spans), 1) if recent_spans else None
-    from_history = len(recent) >= 2
+    from_history = len(lengths) >= 2  # 2 complete cycles overall, even if the window is 1
 
     cycle_length = round_half_up(sum(recent) / len(recent)) if from_history else rules.typical_cycle
     if from_history and recent_spans:

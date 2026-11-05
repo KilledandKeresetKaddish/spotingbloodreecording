@@ -116,3 +116,13 @@ def test_phases_across_one_cycle():
     nxt = cycles.describe_day(t.next_start, t.cycles, today)
     assert nxt["phase"] == "menstrual" and nxt["predicted_cycle"] is True and nxt["cycle_day"] == 1
     assert cycles.describe_day(a - D, t.cycles, today)["phase"] is None
+
+
+def test_window_of_one_cycle_still_counts_as_history():
+    a = date(2030, 1, 1)
+    starts = [a, a + 30 * D, a + 56 * D, a + 88 * D]  # 30, 26, 32
+    periods = [d for s in starts for d in days(s, 4)]
+    stats = cycles.compute_stats(cycles.group_periods(periods, 7), today=starts[-1] + 5 * D,
+                                 rules=Rules(prediction_cycles=1))
+    assert stats.from_history is True
+    assert stats.cycle_length == 32  # only the latest complete cycle
