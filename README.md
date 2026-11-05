@@ -46,7 +46,19 @@ health.example.com {
 }
 ```
 
-如果 Caddy 也跑在 Docker 里：把两个容器放进同一个 Docker 网络，改成 `reverse_proxy health-log:8000`，并删掉 `docker-compose.yml` 里的 `ports:`。
+如果 Caddy 也跑在 Docker 里：先看它在哪个网络（`docker inspect <caddy 容器> --format '{{json .NetworkSettings.Networks}}'`），再在服务器上建一个 `docker-compose.override.yml`（已经在 `.gitignore` 里）让这个 app 也加入那个网络：
+
+```yaml
+services:
+  health:
+    networks: [default, caddy]
+networks:
+  caddy:
+    external: true
+    name: caddy_default   # 换成 Caddy 所在的网络名
+```
+
+Caddyfile 里就写 `reverse_proxy health-log:8000`。`127.0.0.1` 上的端口可以留着，方便在服务器上用 curl 测。
 
 更新：
 
@@ -67,7 +79,15 @@ docker compose exec health python -c "import sqlite3; sqlite3.connect('/data/hea
 
 ## 数据格式
 
-导出的 JSON 是 `format: "health-log"`、`version: 1`，里面有 `settings`、`categories`、`items`、`entries`。别的 app 的数据（比如 Ovumcy），以后写个转换脚本转成这个格式，再从设置页导入。
+导出的 JSON 是 `format: "health-log"`、`version: 1`，里面有 `settings`、`categories`、`items`、`entries`。别的 app 的数据先转成这个格式，再从设置页导入（合并，不用勾「从备份还原」）。
+
+Ovumcy：
+
+```sh
+python tools/ovumcy_to_healthlog.py ovumcy-export.json health-log-import.json
+```
+
+它会打印每样东西去了哪里。对应规则写在脚本开头；没有对应项目的（比如心情评分）都留在那天的笔记里，不会丢。转出来的文件是个人数据，别放进仓库。
 
 ## 目录
 
