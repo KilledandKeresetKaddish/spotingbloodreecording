@@ -37,6 +37,7 @@ DAY = timedelta(days=1)
 SINGLE_KINDS = {"switch", "toggle", "level", "number", "text"}  # at most one entry per day
 CUSTOM_KINDS = ("toggle", "level", "count", "number", "result", "medication", "text")
 UNHIDEABLE_ROLES = {"period", "flow"}
+UNDELETABLE_ROLES = {"period", "flow", "lh"}  # the cycle rules depend on these
 MAX_STRIP_ITEMS = 2
 MAX_RANGE_DAYS = 400
 MAX_FUTURE_DAYS = 800
@@ -473,7 +474,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/config")
     def config(conn: sqlite3.Connection = Conn):
+        counts = dict(conn.execute("SELECT item_id, COUNT(*) FROM entries GROUP BY item_id").fetchall())
         items = [item_dict(r) for r in conn.execute("SELECT * FROM items ORDER BY sort, rowid")]
+        for i in items:
+            i["entries"] = counts.get(i["id"], 0)
+            i["deletable"] = i["role"] not in UNDELETABLE_ROLES
         cats = []
         for row in conn.execute("SELECT * FROM categories ORDER BY sort, rowid"):
             c = category_dict(row)
@@ -482,7 +487,34 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"categories": cats, "settings": load_settings(conn),
                 "kinds": list(CUSTOM_KINDS), "max_strip_items": MAX_STRIP_ITEMS}
 
-    # -- categories and items (hidden, never deleted)
+    # -- categories and items. Hiding keeps the records; deleting an item that has
+    #    records needs ?with_entries=true and removes them too.
+
+    @app.delete("/api/categories/{cat_id}")
+    def delete_category(cat_id: str, conn: sqlite3.Connection = Conn):
+        row = conn.execute("SELECT * FROM categories WHERE id = ?", (cat_id,)).fetchone()
+        if row is None:
+            bad("没有这个分类", 404)
+        if row["builtin"]:
+            bad("血量和检测是内置分类，不能删除")
+        if conn.execute("SELECT 1 FROM items WHERE category_id = ?", (cat_id,)).fetchone():
+            bad("分类里还有项目，先把它们删掉或移到别的分类", 409)
+        conn.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
+        conn.commit()
+        return category_dict(row)
+
+    @app.delete("/api/items/{item_id}")
+    def delete_item(item_id: str, with_entries: bool = False, conn: sqlite3.Connection = Conn):
+        item = get_item(conn, item_id)
+        if item["role"] in UNDELETABLE_ROLES:
+            bad("月经、经量和排卵试纸是算周期用的，不能删除")
+        count = conn.execute("SELECT COUNT(*) FROM entries WHERE item_id = ?", (item_id,)).fetchone()[0]
+        if count and not with_entries:
+            bad(f"这个项目有 {count} 条记录，要连记录一起删", 409)
+        conn.execute("DELETE FROM entries WHERE item_id = ?", (item_id,))
+        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        conn.commit()
+        return {**item_dict(item), "deleted_entries": count}
 
     @app.post("/api/categories", status_code=201)
     def add_category(body: CategoryIn, conn: sqlite3.Connection = Conn):
@@ -773,7 +805,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         applies the file's settings, names, order and hidden flags to what already exists."""
         if body.get("format") != EXPORT_FORMAT or body.get("version") != EXPORT_VERSION:
             bad(f"需要 {EXPORT_FORMAT} v{EXPORT_VERSION} 格式的文件", 422)
-        added = {"categories": 0, "items": 0, "entries": 0, "skipped": 0}
+        added = {"categories": 0, "items": 0, "entries": 0, "skipped": 0, "missing_item": 0}
         pins: list[str] = []  # items marked on the strip in the file, in file order
         try:
             for c in body.get("categories", []):
@@ -832,7 +864,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 settings = load_settings(conn)
             for e in body.get("entries", []):
                 d = parse_date(e.get("date"), "entries.date").isoformat()
-                item = get_item(conn, str(e.get("item_id")))
+                item = conn.execute("SELECT * FROM items WHERE id = ?", (str(e.get("item_id")),)).fetchone()
+                if item is None:  # e.g. an item that was deleted here
+                    added["missing_item"] += 1
+                    continue
                 source = e.get("source") if e.get("source") in ("manual", "auto") else "manual"
                 if item["kind"] == "switch":
                     value, choice, text, time = 1, None, None, None
