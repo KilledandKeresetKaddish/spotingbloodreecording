@@ -87,7 +87,15 @@ Ovumcy：
 python tools/ovumcy_to_healthlog.py ovumcy-export.json health-log-import.json
 ```
 
-它会打印每样东西去了哪里。对应规则写在脚本开头；没有对应项目的（比如心情评分）都留在那天的笔记里，不会丢。转出来的文件是个人数据，别放进仓库。
+Flo（账户数据导出里那个大 JSON）：
+
+```sh
+python tools/flo_to_healthlog.py flo-export.json health-log-import.json --before 2026-05-09
+```
+
+`--before` 只留那天之前的 Flo 记录，用在后面已经有别的 app（比如 Ovumcy）记录的时候。
+
+两个脚本都会打印每样东西去了哪里。对应规则写在脚本开头；没有对应项目的（比如心情评分）都留在那天的笔记里，不会丢。转出来的文件是个人数据，别放进仓库。
 
 ## 目录
 
