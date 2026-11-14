@@ -31,6 +31,7 @@ EXPORT = {
         event("2030-01-02", "Temperature", "Basal", value=36.599998474121094),
         event("2030-01-02", "Weight", "Weight", value=52.29999923706055),
         event("2030-01-02", "Water", "Water", volume=0.5),
+        event("2030-01-02", "Water", "Water", volume=0.5),  # the same serving twice: both count
         event("2030-01-03", "Fluid", "Bloody"),          # on a period day: nothing extra
         event("2030-01-12", "Fluid", "Bloody"),          # outside: spotting without an amount
         event("2030-01-12", "Mood", "Sad"), event("2030-01-12", "Mood", "Depressed"),
@@ -53,7 +54,7 @@ def test_mapping():
     assert by(out, "2030-01-01", "flow")[0]["value"] == 3 and by(out, "2030-01-02", "flow")[0]["value"] == 2
     assert by(out, "2030-01-02", "temperature")[0]["value"] == 36.6
     assert by(out, "2030-01-02", "weight")[0]["value"] == 52.3
-    assert by(out, "2030-01-02", "water")[0]["value"] == 500
+    assert [e["value"] for e in by(out, "2030-01-02", "water")] == [1000]
     assert "Flo 用药：09:00 药A" in by(out, "2030-01-02", "note")[0]["text"]
     assert not by(out, "2030-01-03", "ovumcy_spotting") and by(out, "2030-01-12", "ovumcy_spotting")
     assert by(out, "2030-01-12", "mood_07")[0]["text"] == "Flo：难过；Flo：抑郁"

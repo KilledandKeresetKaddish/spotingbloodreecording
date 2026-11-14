@@ -922,7 +922,9 @@ async function viewCycles() {
   const s = settings();
   const basis = st?.from_history
     ? `预测用最近 ${Math.min(st.complete_cycles - st.excluded_cycles, s.prediction_cycles)} 个完整周期的平均：周期 ${st.cycle_length} 天，经期 ${st.period_length} 天。${st.excluded_cycles ? `超过 ${s.outlier_cycle_days} 天的 ${st.excluded_cycles} 个周期没算进去。` : ''}`
-    : `完整周期还不到 2 个，先用设置里的一般值：周期 ${s.typical_cycle_length} 天，经期 ${s.typical_period_length} 天。`;
+    : `${st?.excluded_cycles
+      ? `能用的完整周期还不到 2 个（一共 ${st.complete_cycles} 个，其中 ${st.excluded_cycles} 个超过 ${s.outlier_cycle_days} 天没算进去）`
+      : '完整周期还不到 2 个'}，先用设置里的一般值：周期 ${s.typical_cycle_length} 天，经期 ${s.typical_period_length} 天。`;
   const next = data.next_start ? `下次月经预计 ${data.next_range ? rangeText(...data.next_range) : md(data.next_start)}。` : '';
   children.push(h('p', { class: 'sub', style: 'margin:12px 16px 0' }, basis, next));
 
