@@ -286,3 +286,25 @@ def test_import_skips_entries_of_deleted_items(client):
     client.delete("/api/entries/1")
     r = client.post("/api/import", json={**dump, "items": [i for i in dump["items"] if i["id"] != "mood_02"]}).json()
     assert r["entries"] == 1 and r["missing_item"] == 1
+
+def test_outlier_cycles_are_marked(client):
+    today = START + 200 * D
+    for offset in (0, 30, 136, 168):
+        client.put(f"/api/days/{iso(START + offset * D)}/period", json={"on": True}, params={"today": iso(today)})
+    data = client.get("/api/cycles", params={"today": iso(today)}).json()
+    assert [c["outlier"] for c in data["cycles"]] == [False, False, True, False]
+    assert data["stats"]["excluded_cycles"] == 1 and data["stats"]["cycle_length"] == 31
+    assert client.put("/api/settings", json={"outlier_cycle_days": 10}).status_code == 422
+
+
+def test_deleted_items_stay_deleted_on_merge_import(client):
+    custom = client.post("/api/items", json={"category_id": "life", "name": "建错了", "kind": "toggle"}).json()
+    for item_id in (custom["id"], "mood_03"):
+        client.post("/api/entries", json={"date": iso(START), "item_id": item_id})
+    dump = client.get("/api/export.json").json()  # still lists both items and their records
+    for item_id in (custom["id"], "mood_03"):
+        assert client.delete(f"/api/items/{item_id}", params={"with_entries": "true"}).status_code == 200
+    r = client.post("/api/import", json=dump).json()
+    assert r["items"] == 0 and r["missing_item"] == 2 and r["entries"] == 0
+    ids = {i["id"] for c in client.get("/api/config").json()["categories"] for i in c["items"]}
+    assert custom["id"] not in ids and "mood_03" not in ids

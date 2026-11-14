@@ -74,7 +74,7 @@ def convert(data: dict, before: str | None = None) -> tuple[dict, dict]:
     notes: dict[str, list[str]] = defaultdict(list)
     toggles: dict[tuple[str, str], list[str]] = defaultdict(list)  # (day, item) -> texts
     single: dict[tuple[str, str], float] = {}                      # (day, item) -> value
-    water: list[tuple[str, float]] = []
+    water: dict[str, float] = defaultdict(float)  # day -> ml; Flo logs have no usable time
 
     def add(day, item_id, value=None, text=None):
         entries.append({"date": day, "item_id": item_id, "value": value, "choice": None, "text": text,
@@ -115,7 +115,7 @@ def convert(data: dict, before: str | None = None) -> tuple[dict, dict]:
         elif key == ("Weight", "Weight") and props.get("value"):
             single[(d, "weight")] = round(float(props["value"]), 1)
         elif key == ("Water", "Water") and props.get("volume"):
-            water.append((d, round(float(props["volume"]) * 1000)))  # litres -> ml
+            water[d] += float(props["volume"]) * 1000  # litres -> ml, summed per day
         elif key == ("Sleep", "Sleep") and props.get("value"):
             notes[d].append(f"Flo 睡眠：{int(props['value']) / 60:g} 小时")
             report["as_text"]["Sleep"] += 1
@@ -150,8 +150,8 @@ def convert(data: dict, before: str | None = None) -> tuple[dict, dict]:
         add(d, "period", value=1)
     for (d, item_id), value in sorted(single.items()):
         add(d, item_id, value=value)
-    for d, ml in sorted(water):
-        add(d, "water", value=ml)
+    for d, ml in sorted(water.items()):  # one entry per day, so the import cannot drop equal servings
+        add(d, "water", value=round(ml))
     uses_unmeasured = False
     for (d, item_id), texts in sorted(toggles.items()):
         uses_unmeasured |= item_id == UNMEASURED_SPOTTING["id"]
