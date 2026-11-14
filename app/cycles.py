@@ -8,6 +8,8 @@ The rules follow SPEC.md, section 「周期与时期计算」:
   previous period day.
 - Fewer than 2 complete cycles: predict with the typical lengths from settings.
   Otherwise use the mean of the last ``prediction_cycles`` complete cycles.
+- Complete cycles longer than ``outlier_cycle`` days (usually unrecorded months)
+  are shown but left out of the averages and the range.
 - Fertile window (排卵期) = 6 days. With a positive LH test, the first positive day
   is day 5 of the window (Apple's rule) and ovulation is the day after it.
   Without one, ovulation = next period start - ``ovulation_offset`` days and the
@@ -30,6 +32,7 @@ class Rules:
     ovulation_offset: int = 13
     gap_days: int = 7
     prediction_cycles: int = 6
+    outlier_cycle: int = 60
 
 
 @dataclass
@@ -42,6 +45,7 @@ class Stats:
     cycle_length: int      # length used for predictions
     period_length: int     # period length used for predictions
     from_history: bool     # False while predictions still use the typical lengths
+    excluded_cycles: int = 0  # complete cycles left out as longer than outlier_cycle
 
 
 @dataclass
@@ -85,7 +89,8 @@ def group_periods(period_dates: Iterable[date], gap_days: int) -> list[list[date
 
 def compute_stats(groups: list[list[date]], today: date, rules: Rules) -> Stats:
     starts = [g[0] for g in groups]
-    lengths = [(b - a).days for a, b in zip(starts, starts[1:])]
+    all_lengths = [(b - a).days for a, b in zip(starts, starts[1:])]
+    lengths = [n for n in all_lengths if n <= rules.outlier_cycle]
     recent = lengths[-rules.prediction_cycles:]
 
     spans = [(g[-1] - g[0]).days + 1 for g in groups]
@@ -104,7 +109,7 @@ def compute_stats(groups: list[list[date]], today: date, rules: Rules) -> Stats:
         period_length = rules.typical_period
 
     return Stats(
-        complete_cycles=len(lengths),
+        complete_cycles=len(all_lengths),
         avg_cycle=avg_cycle,
         avg_period=avg_period,
         min_cycle=min(recent) if recent else None,
@@ -112,6 +117,7 @@ def compute_stats(groups: list[list[date]], today: date, rules: Rules) -> Stats:
         cycle_length=max(1, cycle_length),
         period_length=period_length,
         from_history=from_history,
+        excluded_cycles=len(all_lengths) - len(lengths),
     )
 
 

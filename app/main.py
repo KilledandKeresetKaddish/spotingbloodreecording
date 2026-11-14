@@ -56,6 +56,7 @@ SETTING_RULES: dict[str, tuple[float, float, bool]] = {
     "cup_ml": (10, 3000, True),
     "new_cycle_gap_days": (1, 30, True),
     "prediction_cycles": (1, 24, True),
+    "outlier_cycle_days": (35, 180, True),
     "onboarded": (0, 1, True),
 }
 
@@ -99,6 +100,7 @@ def rules_from(settings: dict) -> cycles.Rules:
         ovulation_offset=settings["ovulation_offset_days"],
         gap_days=settings["new_cycle_gap_days"],
         prediction_cycles=settings["prediction_cycles"],
+        outlier_cycle=settings["outlier_cycle_days"],
     )
 
 
@@ -328,7 +330,7 @@ def set_period(conn: sqlite3.Connection, d: date, on: bool, settings: dict, toda
     return changed
 
 
-def cycle_summary(c: cycles.Cycle, today: date) -> dict:
+def cycle_summary(c: cycles.Cycle, today: date, outlier: int | None = None) -> dict:
     return {
         "start": c.start.isoformat(),
         "last_day": (c.end - DAY).isoformat(),
@@ -340,6 +342,7 @@ def cycle_summary(c: cycles.Cycle, today: date) -> dict:
         "window_start": c.window_start.isoformat(),
         "ovulation": c.ovulation.isoformat(),
         "measured": c.measured,
+        "outlier": bool(outlier) and c.complete and c.length > outlier,
     }
 
 
@@ -719,7 +722,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         c = cycles.find_cycle(timeline.cycles, d)
         if c is None:
             return {"cycle": None, "days": []}
-        summary = cycle_summary(c, t)
+        summary = cycle_summary(c, t, settings["outlier_cycle_days"])
         if summary["current"] and timeline.next_start:
             summary["next_start"] = timeline.next_start.isoformat()
             summary["next_range"] = [x.isoformat() for x in timeline.next_range] if timeline.next_range else None
@@ -737,7 +740,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             days = day_payloads(conn, settings, recorded[0].start, recorded[-1].end - DAY, t, timeline)
             by_date = {x["date"]: x for x in days}
             for c in reversed(recorded):
-                row = cycle_summary(c, t)
+                row = cycle_summary(c, t, settings["outlier_cycle_days"])
                 row["days"] = [by_date[(c.start + k * DAY).isoformat()] for k in range(c.length)]
                 rows.append(row)
         return {

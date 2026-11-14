@@ -905,7 +905,7 @@ async function viewCycles() {
         if (marks.length) hasDots = true;
         dots.push(h('div', {}, marks));
       }
-      return h('div', { class: 'row' }, h('span', {}, label), h('div', { class: 'block', style: 'gap:2px' },
+      return h('div', { class: 'row' }, h('span', { style: r.outlier ? 'opacity:0.5' : null, title: r.outlier ? '没算进预测' : null }, label), h('div', { class: 'block', style: 'gap:2px' },
         h('div', { class: 'cells', style: tmpl }, cells),
         hasDots ? h('div', { class: 'dots', style: tmpl }, dots) : null));
     });
@@ -921,7 +921,7 @@ async function viewCycles() {
 
   const s = settings();
   const basis = st?.from_history
-    ? `预测用最近 ${Math.min(st.complete_cycles, s.prediction_cycles)} 个完整周期的平均：周期 ${st.cycle_length} 天，经期 ${st.period_length} 天。`
+    ? `预测用最近 ${Math.min(st.complete_cycles - st.excluded_cycles, s.prediction_cycles)} 个完整周期的平均：周期 ${st.cycle_length} 天，经期 ${st.period_length} 天。${st.excluded_cycles ? `超过 ${s.outlier_cycle_days} 天的 ${st.excluded_cycles} 个周期没算进去。` : ''}`
     : `完整周期还不到 2 个，先用设置里的一般值：周期 ${s.typical_cycle_length} 天，经期 ${s.typical_period_length} 天。`;
   const next = data.next_start ? `下次月经预计 ${data.next_range ? rangeText(...data.next_range) : md(data.next_start)}。` : '';
   children.push(h('p', { class: 'sub', style: 'margin:12px 16px 0' }, basis, next));
@@ -933,7 +933,7 @@ async function viewCycles() {
         const todayRow = c.days.find((d) => d.date === t);
         const info = c.current
           ? `进行中 · 第 ${todayRow ? todayRow.cycle_day : '?'} 天 · 经期 ${c.period_days} 天`
-          : `${c.length} 天 · 经期 ${c.period_days} 天${c.measured ? ' · LH 定位' : ''}`;
+          : `${c.length} 天 · 经期 ${c.period_days} 天${c.measured ? ' · LH 定位' : ''}${c.outlier ? ' · 没算进预测' : ''}`;
         return h('button', { type: 'button', class: 'list-row', onclick: () => { state.selected = c.start; state.month = c.start.slice(0, 7); location.hash = '#/'; } },
           h('span', {}, md(c.start)), h('span', { class: 'meta' }, info));
       }))));
@@ -975,6 +975,7 @@ const SETTING_FIELDS = [
   ['typical_cycle_length', '一般周期几天', '从这次月经第一天到下次月经第一天', 1],
   ['new_cycle_gap_days', '隔几天算新周期', '离上一个月经日超过这么多天，再打开开关才算新周期', 1],
   ['prediction_cycles', '预测用几个周期', '有 2 个以上完整周期后，用最近这么多个的平均', 1],
+  ['outlier_cycle_days', '超过几天的周期不算进预测', '通常是漏记了月经的月份；周期页照常显示，标「没算进预测」', 1],
   ['ovulation_offset_days', '没测 LH 时，排卵日在下次月经前几天', 'Apple 的推算方式：排卵期 6 天，排卵日是最后一天', 1],
   ['lh_positive_threshold', 'LH 阳性线（mIU/mL）', '读数大于或等于它算阳性', 0.5],
   ['cup_ml', '一杯水多少 ml', '点「+1 杯」时记的量', 10],

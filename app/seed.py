@@ -13,6 +13,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "cup_ml": "500",                # 一杯水
     "new_cycle_gap_days": "7",      # 离上一个月经日超过这么多天，才算新周期
     "prediction_cycles": "6",       # 预测用最近几个完整周期
+    "outlier_cycle_days": "60",     # 超过这么多天的周期不算进预测
     "onboarded": "0",
 }
 

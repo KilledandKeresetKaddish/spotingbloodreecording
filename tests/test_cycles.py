@@ -126,3 +126,15 @@ def test_window_of_one_cycle_still_counts_as_history():
                                  rules=Rules(prediction_cycles=1))
     assert stats.from_history is True
     assert stats.cycle_length == 32  # only the latest complete cycle
+
+
+def test_very_long_cycles_are_left_out_of_predictions():
+    a = date(2030, 1, 1)
+    starts = [a, a + 30 * D, a + 136 * D, a + 168 * D, a + 198 * D]  # 30, 106 (months not recorded), 32, 30
+    periods = [d for s in starts for d in days(s, 5)]
+    stats = cycles.compute_stats(cycles.group_periods(periods, 7), today=starts[-1] + 3 * D, rules=RULES)
+    assert stats.complete_cycles == 4 and stats.excluded_cycles == 1
+    assert stats.cycle_length == 31 and (stats.min_cycle, stats.max_cycle) == (30, 32)
+    loose = cycles.compute_stats(cycles.group_periods(periods, 7), today=starts[-1] + 3 * D,
+                                 rules=Rules(outlier_cycle=120))
+    assert loose.excluded_cycles == 0 and loose.max_cycle == 106

@@ -286,3 +286,12 @@ def test_import_skips_entries_of_deleted_items(client):
     client.delete("/api/entries/1")
     r = client.post("/api/import", json={**dump, "items": [i for i in dump["items"] if i["id"] != "mood_02"]}).json()
     assert r["entries"] == 1 and r["missing_item"] == 1
+
+def test_outlier_cycles_are_marked(client):
+    today = START + 200 * D
+    for offset in (0, 30, 136, 168):
+        client.put(f"/api/days/{iso(START + offset * D)}/period", json={"on": True}, params={"today": iso(today)})
+    data = client.get("/api/cycles", params={"today": iso(today)}).json()
+    assert [c["outlier"] for c in data["cycles"]] == [False, False, True, False]
+    assert data["stats"]["excluded_cycles"] == 1 and data["stats"]["cycle_length"] == 31
+    assert client.put("/api/settings", json={"outlier_cycle_days": 10}).status_code == 422
