@@ -253,3 +253,36 @@ def test_import_keeps_markers_and_restore_brings_back_layout(client, tmp_path):
         assert items["mood_02"]["hidden"] is True
         assert items[med["id"]]["on_strip"] and items["life_01"]["on_strip"]
         assert cfg["settings"]["cup_ml"] == 330
+
+
+def test_delete_items_and_categories(client):
+    cat = client.post("/api/categories", json={"name": "试试"}).json()
+    unused = client.post("/api/items", json={"category_id": cat["id"], "name": "建错了", "kind": "toggle"}).json()
+    used = client.post("/api/items", json={"category_id": cat["id"], "name": "用过的", "kind": "toggle"}).json()
+    client.post("/api/entries", json={"date": iso(START), "item_id": used["id"]})
+    client.post("/api/entries", json={"date": iso(START + D), "item_id": used["id"]})
+
+    items = {i["id"]: i for c in client.get("/api/config").json()["categories"] for i in c["items"]}
+    assert items[used["id"]]["entries"] == 2 and items[unused["id"]]["entries"] == 0
+    assert items["period"]["deletable"] is False and items["mood_01"]["deletable"] is True
+
+    assert client.delete(f"/api/items/{unused['id']}").status_code == 200
+    assert client.delete(f"/api/categories/{cat['id']}").status_code == 409  # still holds an item
+    assert client.delete(f"/api/items/{used['id']}").status_code == 409      # has records
+    r = client.delete(f"/api/items/{used['id']}", params={"with_entries": "true"})
+    assert r.status_code == 200 and r.json()["deleted_entries"] == 2
+    assert client.get(f"/api/days/{iso(START)}").json()["entries"] == []
+    assert client.delete(f"/api/categories/{cat['id']}").status_code == 200
+    assert client.delete("/api/categories/bleeding").status_code == 400
+    for role_item in ("period", "flow", "lh"):
+        assert client.delete(f"/api/items/{role_item}").status_code == 400
+
+
+def test_import_skips_entries_of_deleted_items(client):
+    client.post("/api/entries", json={"date": iso(START), "item_id": "mood_01"})
+    client.post("/api/entries", json={"date": iso(START), "item_id": "mood_02"})
+    dump = client.get("/api/export.json").json()
+    client.delete("/api/items/mood_02", params={"with_entries": "true"})
+    client.delete("/api/entries/1")
+    r = client.post("/api/import", json={**dump, "items": [i for i in dump["items"] if i["id"] != "mood_02"]}).json()
+    assert r["entries"] == 1 and r["missing_item"] == 1

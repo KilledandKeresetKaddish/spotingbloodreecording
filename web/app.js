@@ -203,9 +203,9 @@ function group(label, control, forId, hint) {
     hint ? h('span', { class: 'hint' }, hint) : null);
 }
 
-function sheetButtons({ onDelete, onDone, doneText = '完成' }) {
+function sheetButtons({ onDelete, onDone, doneText = '完成', deleteText = '删除这条' }) {
   return h('div', { class: 'sheet-actions' },
-    onDelete ? h('button', { type: 'button', class: 'danger', onclick: onDelete }, '删除这条') : h('span'),
+    onDelete ? h('button', { type: 'button', class: 'danger', onclick: onDelete }, deleteText) : h('span'),
     h('button', { type: 'button', class: 'primary', onclick: onDone }, doneText));
 }
 
@@ -1000,7 +1000,7 @@ async function viewSettings() {
     h('section', { class: 'card', 'aria-label': '周期设置' }, h('h2', { class: 'label-mono' }, '周期'), form,
       h('button', { type: 'button', class: 'primary', onclick: saveSettings }, '保存')),
     h('section', { class: 'card gap-top', 'aria-label': '分类和项目' }, h('h2', { class: 'label-mono' }, '分类和项目'),
-      h('p', { class: 'hint', style: 'margin:0' }, '点名字改名。隐藏的不会删掉，记录都还在，随时可以再显示。'),
+      h('p', { class: 'hint', style: 'margin:0' }, '点名字可以改名或删除。隐藏不会丢记录，随时能再显示；删除会连记录一起删掉。'),
       categoryEditor(),
       h('button', { type: 'button', class: 'chip dashed', onclick: () => nameSheet('新分类', '', (name) => api('api/categories', { method: 'POST', body: { name } })) }, '＋ 添加分类')),
     h('section', { class: 'card gap-top', 'aria-label': '数据' }, h('h2', { class: 'label-mono' }, '数据'),
@@ -1026,7 +1026,7 @@ function categoryEditor() {
       act('已排序', () => api(`api/categories/${c.id}/order`, { method: 'PUT', body: { ids } }));
     };
     const head = h('div', { class: `cat-head${c.hidden ? ' is-hidden' : ''}` },
-      h('button', { type: 'button', class: 'grow', onclick: () => nameSheet('分类名', c.name, (name) => api(`api/categories/${c.id}`, { method: 'PATCH', body: { name } })) },
+      h('button', { type: 'button', class: 'grow', onclick: () => nameSheet('分类名', c.name, (name) => api(`api/categories/${c.id}`, { method: 'PATCH', body: { name } }), c) },
         c.name, c.builtin ? h('span', { class: 'kind' }, '内置') : null),
       h('button', { type: 'button', class: 'mini', 'aria-label': `${c.name} 上移`, disabled: idx === 0, onclick: () => moveCat(idx, -1) }, icon('up', 16)),
       h('button', { type: 'button', class: 'mini', 'aria-label': `${c.name} 下移`, disabled: idx === cats.length - 1, onclick: () => moveCat(idx, 1) }, icon('down', 16)),
@@ -1049,10 +1049,33 @@ function categoryEditor() {
   }));
 }
 
-function nameSheet(title, current, run) {
+function nameSheet(title, current, run, cat) {
   openSheet(title, null, ({ body, err, save }) => {
     const input = h('input', { id: 'sheet-name', class: 'field wide', maxlength: 40, value: current });
-    body.append(group('名字', input, 'sheet-name'), err, sheetButtons({ onDone: () => save('已保存', () => run(input.value)) }));
+    const canDelete = cat && !cat.builtin && !cat.items.length;
+    const note = cat && !cat.builtin && cat.items.length
+      ? h('span', { class: 'hint' }, '分类里还有项目，把它们删掉或移到别的分类之后，才能删这个分类。') : null;
+    body.append(group('名字', input, 'sheet-name'), note, err, sheetButtons({
+      deleteText: '删除这个分类',
+      onDelete: canDelete ? () => save(`已删除 · ${cat.name}`, () => api(`api/categories/${cat.id}`, { method: 'DELETE' })) : null,
+      onDone: () => save('已保存', () => run(input.value)),
+    }));
+  });
+}
+
+// deleting an item: straight away when it has no records, otherwise after a clear warning
+function deleteItem(item, save) {
+  const run = (withEntries) => api(`api/items/${item.id}`, { method: 'DELETE', query: { with_entries: withEntries ? 'true' : null } });
+  if (!item.entries) return save(`已删除 · ${item.name}`, () => run(false));
+  openSheet(`删除「${item.name}」？`, null, ({ body, err, save: confirm }) => {
+    body.append(
+      h('p', { class: 'empty', style: 'color:var(--ink)' }, `这个项目有 ${item.entries} 条记录，会一起删掉，删了找不回来。`),
+      h('p', { class: 'hint', style: 'margin:0' }, '只是不想看到它的话，用「隐藏」就好，记录都会留着。要删的话，可以先在设置最下面「导出 JSON」备份一份。'),
+      err,
+      h('div', { class: 'sheet-actions' },
+        h('button', { type: 'button', class: 'link-btn', onclick: () => $sheet.close() }, '取消'),
+        h('button', { type: 'button', class: 'danger', style: 'border:1px solid var(--danger);border-radius:8px;padding:0 20px',
+          onclick: () => confirm(`已删除 · ${item.name}（${item.entries} 条记录）`, () => run(true)) }, `连同 ${item.entries} 条记录删除`)));
   });
 }
 
@@ -1079,8 +1102,13 @@ function itemSheet(cat, item) {
     body.append(
       group('名字', name, 'sheet-name'),
       group('类型', kind, 'sheet-kind', item ? '类型建好后不能改' : '勾选=点一下打勾；药物=量+时间，一天可以多次；等级=1–4 级；结果=阴/阳这类'),
-      unitGroup, amountGroup, optionsGroup, err,
+      unitGroup, amountGroup, optionsGroup,
+      item && !item.deletable ? h('span', { class: 'hint' }, '这个是算周期用的，可以改名、排序，不能删除。') : null,
+      item && item.deletable && item.entries ? h('span', { class: 'hint' }, `已经有 ${item.entries} 条记录`) : null,
+      err,
       sheetButtons({
+        deleteText: '删除这个项目',
+        onDelete: item && item.deletable ? () => deleteItem(item, save) : null,
         onDone: () => {
           const payload = { name: name.value };
           if (!unitGroup.hidden) payload.unit = unit.value || null;
